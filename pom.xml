@@ -12,6 +12,9 @@
         <maven.compiler.source>8</maven.compiler.source>
         <maven.compiler.target>8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- Merge commit needs the SDK of starrocks-connector-for-apache-flink, which is not released yet.
+             Install it from that repository first: cd starrocks-stream-load-sdk && mvn install -DskipTests -->
+        <starrocks-stream-load-sdk.version>1.1-SNAPSHOT</starrocks-stream-load-sdk.version>
     </properties>
 
     <build>
@@ -199,7 +202,7 @@
         <dependency>
             <groupId>com.starrocks</groupId>
             <artifactId>starrocks-stream-load-sdk</artifactId>
-            <version>1.0</version>
+            <version>${starrocks-stream-load-sdk.version}</version>
         </dependency>
 
         <dependency>
