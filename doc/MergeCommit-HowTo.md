@@ -71,7 +71,10 @@ With merge commit and JSON, the connector also sets `strip_outer_array=true` and
 
 ## Ordering for primary key tables
 
-A task may have several requests of a table in flight. They can land on different nodes in the same transaction, or in different transactions. Updates of the same key may then apply out of order. To keep the order, set `sink.properties.merge_condition` to a version column, so that an older update does not overwrite a newer one.
+A task may have several requests of a table in flight. They can land on different nodes in the same transaction, or in different transactions that StarRocks commits in any order. Updates of the same key may then apply out of order, without any error and without any failure. In a test with 80,000 keys, each updated every 200 ms, 1.5% of the keys ended at an older version after 8 minutes, while the same load without merge commit kept every key at its last version.
+
+- **Upserts.** Set `sink.properties.merge_condition` to a version column, so that an older update does not overwrite a newer one. With it, every key ended at its last version in the same test, also when a CN, the leader FE or a Kafka Connect worker was killed during the load, and through a rolling restart of the CNs.
+- **Deletes.** StarRocks does not apply a delete (`__op` = 1) with `merge_condition`: a load that has both fails with `delete with condition column`, and the tasks keep failing on it. Without `merge_condition`, a delete can apply after a newer upsert, and an upsert after a newer delete, so keys go missing or deleted keys come back (1.7% of the keys in the same test, with every fifth version a delete). Merge commit cannot keep a table that receives deletes consistent for now. Load such a table without merge commit, or mark deleted rows with a column instead of deleting them, so that `merge_condition` orders them like any other update.
 
 Sending one request of a table at a time (`sink.merge-commit.max-concurrent-requests=0`) would also keep the order, at the cost of throughput and up to one more window plus publish time of latency. The connector rejects a limit for now: with the SDK at starrocks-connector-for-apache-flink `e0eb030`, a table that reaches its limit silently drops data. The limit will be accepted once the SDK includes [the fix](https://github.com/StarRocks/starrocks-connector-for-apache-flink/pull/528).
 
