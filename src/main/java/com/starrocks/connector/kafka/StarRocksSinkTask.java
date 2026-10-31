@@ -80,6 +80,8 @@ public class StarRocksSinkTask extends SinkTask  {
     private long maxRetryTimes;
     private long retryCount = 0;
     private Throwable sdkException;
+    // The first write that put() could not hand to the SDK since the last preCommit.
+    private Exception writeFailure;
 
     private long buffMaxbytes;
     private long bufferFlushInterval;
@@ -359,6 +361,11 @@ public class StarRocksSinkTask extends SinkTask  {
         }
 
         if (occurException && e != null) {
+            // The SDK may not have recorded the failure, for example when the write failed before the SDK registered
+            // the table, so keep it for preCommit, which fails the commit and makes Kafka Connect replay the records.
+            if (writeFailure == null) {
+                writeFailure = e;
+            }
             LOG.info("Starrocks Put occurs exception, Err {} currentBufferBytes {} recordRange [{}:{}-{}:{}] cost {}ms",
                     e.getMessage(), currentBufferBytes, 
                     firstRecord == null ? null : firstRecord.kafkaPartition(),
@@ -378,24 +385,28 @@ public class StarRocksSinkTask extends SinkTask  {
     @Override
     public Map<TopicPartition, OffsetAndMetadata> preCommit(Map<TopicPartition, OffsetAndMetadata> offsets) {
         long start = System.currentTimeMillis();
+        // A write that put() could not hand to the SDK fails the commit like a failed flush.
+        Throwable flushException = writeFailure;
+        writeFailure = null;
         // return previous offset when buffer size and flush interval are not reached
-        if (currentBufferBytes < buffMaxbytes && System.currentTimeMillis() - lastFlushTime < bufferFlushInterval) {
+        if (flushException == null && currentBufferBytes < buffMaxbytes
+                && System.currentTimeMillis() - lastFlushTime < bufferFlushInterval) {
             LOG.info("Starrocks skip preCommit currentBufferBytes {} less than buffMaxbytes {}"
                     + " or SinceLastFlushTime {} less than bufferFlushInterval {}",
                     currentBufferBytes, buffMaxbytes, System.currentTimeMillis() - lastFlushTime, bufferFlushInterval);
             return Collections.emptyMap();
         }
-        Throwable flushException = null;
-        try {
-            LOG.info("Starrocks preCommit flush currentBufferBytes {} and SinceLastFlushTime {}",
-                    currentBufferBytes, System.currentTimeMillis() - lastFlushTime);
-            loadManager.flush();
-        } catch (Exception e) {
-            flushException = e;
-        } finally {
-            lastFlushTime = System.currentTimeMillis();
-            currentBufferBytes = 0;
+        if (flushException == null) {
+            try {
+                LOG.info("Starrocks preCommit flush currentBufferBytes {} and SinceLastFlushTime {}",
+                        currentBufferBytes, System.currentTimeMillis() - lastFlushTime);
+                loadManager.flush();
+            } catch (Exception e) {
+                flushException = e;
+            }
         }
+        lastFlushTime = System.currentTimeMillis();
+        currentBufferBytes = 0;
         if (flushException == null) {
             flushException = loadManager.getException();
         }

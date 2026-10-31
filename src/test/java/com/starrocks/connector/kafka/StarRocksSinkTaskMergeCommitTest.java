@@ -21,9 +21,13 @@
 package com.starrocks.connector.kafka;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.connect.sink.SinkRecord;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -48,6 +52,38 @@ public class StarRocksSinkTaskMergeCommitTest {
         props.put("sink.properties.enable_merge_commit", "true");
         props.put("sink.properties.merge_commit_interval_ms", "1000");
         return props;
+    }
+
+    // A write that fails before the SDK registers the table, here on a timeout that is not a number, leaves no
+    // exception in the SDK. preCommit must still fail, so that Kafka Connect does not commit the offset of a record
+    // that was never sent and replays it instead.
+    @Test
+    public void testFailedWriteFailsPreCommit() {
+        MergeCommitSharedServices.reset();
+        Map<String, String> props = mergeCommitProps();
+        props.put(StarRocksSinkConnectorConfig.STARROCKS_LOAD_URL, "127.0.0.1:1");
+        props.put("sink.properties.timeout", "not-an-integer");
+        StarRocksSinkTask task = new StarRocksSinkTask();
+        task.start(props);
+        try {
+            task.put(Collections.singletonList(new SinkRecord("tbl", 0, null, null, null,
+                    Collections.singletonMap("id", 1), 0)));
+            Map<TopicPartition, OffsetAndMetadata> offsets =
+                    Collections.singletonMap(new TopicPartition("tbl", 0), new OffsetAndMetadata(1));
+            try {
+                task.preCommit(offsets);
+                Assert.fail("preCommit committed the offset of a record that was not written");
+            } catch (RuntimeException e) {
+                Throwable cause = e;
+                while (cause.getCause() != null) {
+                    cause = cause.getCause();
+                }
+                Assert.assertTrue(cause.toString(), cause instanceof NumberFormatException);
+            }
+        } finally {
+            task.stop();
+            MergeCommitSharedServices.reset();
+        }
     }
 
     @Test
