@@ -228,7 +228,8 @@ public class MergeCommitOptionsTest {
         // The SDK then waits up to the stream load timeout.
         Assert.assertEquals(-1, properties.getCheckLabelStateTimeoutMs());
         Assert.assertFalse(properties.isBackendDirectConnection());
-        Assert.assertEquals(0, properties.getMaxRetries());
+        Assert.assertEquals(MergeCommitOptions.DEFAULT_MAX_RETRIES, properties.getMaxRetries());
+        Assert.assertEquals(MergeCommitOptions.DEFAULT_RETRY_INTERVAL_MS, properties.getRetryIntervalInMs());
         Assert.assertEquals(MergeCommitOptions.DEFAULT_PUBLISH_TIMEOUT_MS, properties.getPublishTimeoutMs());
     }
 
@@ -245,6 +246,8 @@ public class MergeCommitOptionsTest {
         props.put(MergeCommitOptions.CHECK_LABEL_STATE_INTERVAL_MS, "200");
         props.put(MergeCommitOptions.CHECK_LABEL_STATE_TIMEOUT_MS, "30000");
         props.put(MergeCommitOptions.BACKEND_DIRECT_CONNECTION, "true");
+        props.put(MergeCommitOptions.MAX_RETRIES, "2");
+        props.put(MergeCommitOptions.RETRY_INTERVAL_MS, "500");
         props.put(SINK_PUBLISH_TIMEOUT_MS, "-1");
         // The task sets the publish timeout from sink.publish-timeout.ms before configure().
         StreamLoadProperties.Builder builder = newBuilder().setPublishTimeoutMs(-1);
@@ -260,6 +263,8 @@ public class MergeCommitOptionsTest {
         Assert.assertEquals(200, properties.getCheckLabelStateIntervalMs());
         Assert.assertEquals(30000, properties.getCheckLabelStateTimeoutMs());
         Assert.assertTrue(properties.isBackendDirectConnection());
+        Assert.assertEquals(2, properties.getMaxRetries());
+        Assert.assertEquals(500, properties.getRetryIntervalInMs());
         Assert.assertEquals(-1, properties.getPublishTimeoutMs());
     }
 

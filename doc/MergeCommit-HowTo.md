@@ -48,6 +48,8 @@ With merge commit and JSON, the connector also sets `strip_outer_array=true` and
 | `bufferflush.intervalms` | `1000` | The flush interval. With merge commit, it can go down to `100`; without merge commit, the minimum stays `1000`. Keep it at most `merge_commit_interval_ms`, so that every task sends data in every window. |
 | `sink.merge-commit.chunk.size` | 20971520, or 524288000 when requests are sent one at a time | The maximum bytes of a table sent in one request. |
 | `sink.merge-commit.max-concurrent-requests` | `2147483647` | The maximum number of inflight requests of a table in a task. `0` or `1` sends one request at a time, which keeps the order of the records. A negative value means no limit. Only no limit is accepted for now, see [Ordering for primary key tables](#ordering-for-primary-key-tables). |
+| `sink.merge-commit.max-retries` | `10` | How many times a failed request is sent again before the flush fails, see [Semantics](#semantics). `0` fails the flush at once. |
+| `sink.merge-commit.retry-interval-ms` | `1000` | How long to wait before sending a failed request again. The SDK adds up to 2 seconds at random, so the default retries span 10 to 30 seconds. |
 | `sink.merge-commit.backend-direct-connection` | `false` | Send requests to the BE or CN nodes that StarRocks assigns to the table, instead of an FE node, which redirects every request through the leader FE. The nodes must be reachable from Kafka Connect. |
 | `sink.merge-commit.http.thread.num` | `3` | Threads that check the state of the merged transactions. |
 | `sink.merge-commit.http.max-connections` | `20` | Maximum HTTP connections to a StarRocks node. |
@@ -63,8 +65,9 @@ With merge commit and JSON, the connector also sets `strip_outer_array=true` and
 ## Semantics
 
 - **At-least-once.** When Kafka Connect commits offsets, the connector flushes and waits until the merged transactions of all data sent so far are visible. If a load fails, the commit fails and Kafka Connect replays the records from the last committed offsets.
-- **No exactly-once.** StarRocks generates the labels of merged transactions and ignores the labels of the requests, so replayed records are loaded again. This is the same as without merge commit.
-- **A bad row fails the whole window.** If a request fails a merged transaction, for example with a row that does not fit the table while `max_filter_ratio` is 0, every request in that transaction fails, including those of other tasks, and they all replay. `max_filter_ratio` applies to the merged transaction as a whole. If bad rows are expected, set `sink.properties.max_filter_ratio`, and `sink.properties.log_rejected_record_num` to keep the rejected rows.
+- **Failed requests are sent again.** The SDK sends each request to an FE it picks at random from `starrocks.http.url`, and does not skip an FE that is down. A failed request is sent again, to another FE picked at random, up to `sink.merge-commit.max-retries` times, which rides out an FE failover and the seconds StarRocks takes to notice a CN that died. Only when the retries run out does the flush fail and the tasks replay.
+- **No exactly-once.** StarRocks generates the labels of merged transactions and ignores the labels of the requests, so replayed records are loaded again, and so is a request that is sent again after StarRocks loaded it but the response was lost. This is the same as without merge commit.
+- **A bad row fails the whole window.** If a request fails a merged transaction, for example with a row that does not fit the table while `max_filter_ratio` is 0, every request in that transaction fails, including those of other tasks. The task that owns the bad row replays it and fails the next window again, so the loads of all tasks keep failing, and loading the same records again, until the bad record is skipped. `max_filter_ratio` applies to the merged transaction as a whole, so set `sink.properties.max_filter_ratio`, for example to `0.001`, to drop the bad rows instead, and `sink.properties.log_rejected_record_num` to keep them.
 
 ## Ordering for primary key tables
 

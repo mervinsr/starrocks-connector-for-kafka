@@ -62,6 +62,8 @@ public class StarRocksSinkTaskMergeCommitTest {
         Assert.assertEquals(2, properties.getIoThreadCount());
         Assert.assertEquals(-1, properties.getPublishTimeoutMs());
         Assert.assertEquals(1000L, properties.getExpectDelayTime());
+        // The merge commit retries do not change the transaction stream load.
+        Assert.assertEquals(0, properties.getMaxRetries());
     }
 
     @Test
@@ -107,7 +109,8 @@ public class StarRocksSinkTaskMergeCommitTest {
         Assert.assertEquals(MergeCommitOptions.DEFAULT_CHUNK_SIZE_FOR_OUT_OF_ORDER,
                 tableProperties.getChunkLimit().longValue());
         Assert.assertEquals(Integer.MAX_VALUE, properties.getMaxConcurrentRequests());
-        Assert.assertEquals(0, properties.getMaxRetries());
+        Assert.assertEquals(MergeCommitOptions.DEFAULT_MAX_RETRIES, properties.getMaxRetries());
+        Assert.assertEquals(MergeCommitOptions.DEFAULT_RETRY_INTERVAL_MS, properties.getRetryIntervalInMs());
         Assert.assertEquals(MergeCommitOptions.DEFAULT_PUBLISH_TIMEOUT_MS, properties.getPublishTimeoutMs());
     }
 
@@ -129,11 +132,15 @@ public class StarRocksSinkTaskMergeCommitTest {
         props.put(MergeCommitOptions.CHUNK_SIZE, "1048576");
         props.put(StarRocksSinkConnectorConfig.SINK_IO_THREAD_COUNT, "4");
         props.put(StarRocksSinkConnectorConfig.SINK_PUBLISH_TIMEOUT_MS, "20000");
+        props.put(MergeCommitOptions.MAX_RETRIES, "0");
+        props.put(MergeCommitOptions.RETRY_INTERVAL_MS, "3000");
         StreamLoadProperties properties = new StarRocksSinkTask().buildLoadProperties(props);
         Assert.assertEquals(1048576L, properties.getDefaultTableProperties().getChunkLimit().longValue());
         Assert.assertTrue(properties.isBackendDirectConnection());
         Assert.assertEquals(4, properties.getIoThreadCount());
         Assert.assertEquals(20000, properties.getPublishTimeoutMs());
+        Assert.assertEquals(0, properties.getMaxRetries());
+        Assert.assertEquals(3000, properties.getRetryIntervalInMs());
     }
 
     @Test

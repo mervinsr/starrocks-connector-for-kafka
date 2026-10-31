@@ -392,6 +392,31 @@ public class StarRocksSinkConnectorConfig {
                         14,
                         ConfigDef.Width.NONE,
                         MergeCommitOptions.BACKEND_DIRECT_CONNECTION
+                ).define(
+                        MergeCommitOptions.MAX_RETRIES,
+                        ConfigDef.Type.INT,
+                        MergeCommitOptions.DEFAULT_MAX_RETRIES,
+                        ConfigDef.Range.atLeast(0),
+                        ConfigDef.Importance.LOW,
+                        "how many times a failed stream load request is sent again, to an fe picked at random, " +
+                                "before the flush fails and the tasks replay the records from their committed " +
+                                "offsets. 0 fails the flush at once",
+                        CONFIG_GROUP_MERGE_COMMIT,
+                        15,
+                        ConfigDef.Width.NONE,
+                        MergeCommitOptions.MAX_RETRIES
+                ).define(
+                        MergeCommitOptions.RETRY_INTERVAL_MS,
+                        ConfigDef.Type.INT,
+                        MergeCommitOptions.DEFAULT_RETRY_INTERVAL_MS,
+                        ConfigDef.Range.atLeast(1),
+                        ConfigDef.Importance.LOW,
+                        "how long to wait before sending a failed stream load request again. The stream load " +
+                                "sdk adds up to 2 seconds at random",
+                        CONFIG_GROUP_MERGE_COMMIT,
+                        16,
+                        ConfigDef.Width.NONE,
+                        MergeCommitOptions.RETRY_INTERVAL_MS
                 );
     }
 

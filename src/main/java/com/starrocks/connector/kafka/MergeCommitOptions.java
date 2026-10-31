@@ -68,6 +68,10 @@ public class MergeCommitOptions {
     // Send the requests to the BE or CN nodes that StarRocks assigns to the table instead of an FE node,
     // which redirects every request through the leader FE.
     public static final String BACKEND_DIRECT_CONNECTION = PREFIX + "backend-direct-connection";
+    // How many times a failed request is sent again before the flush fails, and how long to wait before each
+    // time. The stream load SDK adds up to 2 seconds to the wait at random.
+    public static final String MAX_RETRIES = PREFIX + "max-retries";
+    public static final String RETRY_INTERVAL_MS = PREFIX + "retry-interval-ms";
 
     public static final String DEFAULT_MERGE_COMMIT_PARALLEL = "3";
     public static final String DEFAULT_MERGE_COMMIT_ASYNC = "true";
@@ -82,6 +86,8 @@ public class MergeCommitOptions {
     public static final int DEFAULT_CHECK_LABEL_STATE_INIT_DELAY_MS = 500;
     public static final int DEFAULT_CHECK_LABEL_STATE_INTERVAL_MS = 500;
     public static final int DEFAULT_PUBLISH_TIMEOUT_MS = 10000;
+    public static final int DEFAULT_MAX_RETRIES = 10;
+    public static final int DEFAULT_RETRY_INTERVAL_MS = 1000;
 
     // Without merge commit, each flush of each task is a transaction, so bufferflush.intervalms stays
     // at least 1 second. With merge commit, a smaller interval only adds requests to the merge window.
@@ -196,9 +202,12 @@ public class MergeCommitOptions {
                 .setCheckLabelStateIntervalMs(getInt(props, CHECK_LABEL_STATE_INTERVAL_MS,
                         DEFAULT_CHECK_LABEL_STATE_INTERVAL_MS))
                 .setBackendDirectConnection(getBoolean(props, BACKEND_DIRECT_CONNECTION, false))
-                // A failed load makes preCommit throw, and Kafka Connect then replays the records from
-                // the committed offsets, so the SDK does not keep the data of a request to retry it.
-                .maxRetries(0);
+                // The SDK sends each request to an FE it picks at random, without skipping one that is down,
+                // and a failed flush makes every task replay from its committed offsets. Sending a failed request
+                // again, to another FE, rides out an FE failover and the time StarRocks takes to notice a CN
+                // that died: the default retries span 10 to 30 seconds.
+                .maxRetries(getInt(props, MAX_RETRIES, DEFAULT_MAX_RETRIES))
+                .retryIntervalInMs(getInt(props, RETRY_INTERVAL_MS, DEFAULT_RETRY_INTERVAL_MS));
         if (props.containsKey(CHECK_LABEL_STATE_TIMEOUT_MS)) {
             builder.setCheckLabelStateTimeoutMs(getInt(props, CHECK_LABEL_STATE_TIMEOUT_MS, -1));
         }

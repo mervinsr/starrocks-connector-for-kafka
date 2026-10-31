@@ -93,11 +93,15 @@ public class StarRocksSinkConnectorTest {
         props.put(MergeCommitOptions.CHUNK_SIZE, "0");
         props.put(MergeCommitOptions.HTTP_THREAD_NUM, "0");
         props.put(MergeCommitOptions.MAX_CONCURRENT_REQUESTS, "-1");
+        props.put(MergeCommitOptions.MAX_RETRIES, "-1");
+        props.put(MergeCommitOptions.RETRY_INTERVAL_MS, "0");
         Config config = new StarRocksSinkConnector().validate(props);
         Assert.assertFalse(errors(config, MergeCommitOptions.CHUNK_SIZE).isEmpty());
         Assert.assertFalse(errors(config, MergeCommitOptions.HTTP_THREAD_NUM).isEmpty());
         Assert.assertTrue(errors(config, MergeCommitOptions.MAX_CONCURRENT_REQUESTS).isEmpty());
         Assert.assertTrue(errors(config, MergeCommitOptions.CHECK_LABEL_STATE_TIMEOUT_MS).isEmpty());
+        Assert.assertFalse(errors(config, MergeCommitOptions.MAX_RETRIES).isEmpty());
+        Assert.assertFalse(errors(config, MergeCommitOptions.RETRY_INTERVAL_MS).isEmpty());
 
         props.put(MergeCommitOptions.MAX_CONCURRENT_REQUESTS, "0");
         config = new StarRocksSinkConnector().validate(props);
