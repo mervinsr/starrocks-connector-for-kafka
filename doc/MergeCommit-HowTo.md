@@ -9,7 +9,7 @@ Without merge commit, every flush of every task is a separate Stream Load transa
 ## Requirements
 
 - StarRocks 3.4 or later.
-- The connector built with `starrocks-stream-load-sdk` 1.1-SNAPSHOT. See [How to build](../README.md#how-to-build).
+- The connector built with `starrocks-stream-load-sdk` 1.1-SNAPSHOT. See [How to build](../README.md#how-to-build). Sending the requests of a table one at a time (`sink.merge-commit.max-concurrent-requests`) needs the SDK at starrocks-connector-for-apache-flink `3ad9f84` or later.
 
 ## Quick start
 
@@ -47,7 +47,7 @@ With merge commit and JSON, the connector also sets `strip_outer_array=true` and
 |---|---|---|
 | `bufferflush.intervalms` | `1000` | The flush interval. With merge commit, it can go down to `100`; without merge commit, the minimum stays `1000`. Keep it at most `merge_commit_interval_ms`, so that every task sends data in every window. |
 | `sink.merge-commit.chunk.size` | 20971520, or 524288000 when requests are sent one at a time | The maximum bytes of a table sent in one request. |
-| `sink.merge-commit.max-concurrent-requests` | `2147483647` | The maximum number of inflight requests of a table in a task. `0` or `1` sends one request at a time, which keeps the order of the records. A negative value means no limit. Only no limit is accepted for now, see [Ordering for primary key tables](#ordering-for-primary-key-tables). |
+| `sink.merge-commit.max-concurrent-requests` | `2147483647` | The maximum number of inflight requests of a table in a task. `0` or `1` sends one request at a time, which keeps the order of the records, see [Ordering for primary key tables](#ordering-for-primary-key-tables). A negative value means no limit. A limit needs the SDK at starrocks-connector-for-apache-flink `3ad9f84` or later, and the connector rejects it with an older SDK. |
 | `sink.merge-commit.max-retries` | `10` | How many times a failed request is sent again before the flush fails, see [Semantics](#semantics). `0` fails the flush at once. |
 | `sink.merge-commit.retry-interval-ms` | `1000` | How long to wait before sending a failed request again. The SDK adds up to 2 seconds at random, so the default retries span 10 to 30 seconds. |
 | `sink.merge-commit.backend-direct-connection` | `false` | Send requests to the BE or CN nodes that StarRocks assigns to the table, instead of an FE node, which redirects every request through the leader FE. The nodes must be reachable from Kafka Connect. |
@@ -74,9 +74,12 @@ With merge commit and JSON, the connector also sets `strip_outer_array=true` and
 A task may have several requests of a table in flight. They can land on different nodes in the same transaction, or in different transactions that StarRocks commits in any order. Updates of the same key may then apply out of order, without any error and without any failure. In a test with 80,000 keys, each updated every 200 ms, 1.5% of the keys ended at an older version after 8 minutes, while the same load without merge commit kept every key at its last version.
 
 - **Upserts.** Set `sink.properties.merge_condition` to a version column, so that an older update does not overwrite a newer one. With it, every key ended at its last version in the same test, also when a CN, the leader FE or a Kafka Connect worker was killed during the load, and through a rolling restart of the CNs.
-- **Deletes.** StarRocks does not apply a delete (`__op` = 1) with `merge_condition`: a load that has both fails with `delete with condition column`, and the tasks keep failing on it. Without `merge_condition`, a delete can apply after a newer upsert, and an upsert after a newer delete, so keys go missing or deleted keys come back (1.7% of the keys in the same test, with every fifth version a delete). Merge commit cannot keep a table that receives deletes consistent for now. Load such a table without merge commit, or mark deleted rows with a column instead of deleting them, so that `merge_condition` orders them like any other update.
+- **Deletes.** StarRocks does not apply a delete (`__op` = 1) with `merge_condition`: a load that has both fails with `delete with condition column`, and the tasks keep failing on it. Without `merge_condition`, a delete can apply after a newer upsert, and an upsert after a newer delete, so keys go missing or deleted keys come back (1.7% of the keys in the same test, with every fifth version a delete). Send the requests of such a table one at a time, as below, load it without merge commit, or mark deleted rows with a column instead of deleting them, so that `merge_condition` orders them like any other update.
 
-Sending one request of a table at a time (`sink.merge-commit.max-concurrent-requests=0`) would also keep the order, at the cost of throughput and up to one more window plus publish time of latency. The connector rejects a limit for now: with the SDK at starrocks-connector-for-apache-flink `e0eb030`, a table that reaches its limit silently drops data. The limit will be accepted once the SDK includes [the fix](https://github.com/StarRocks/starrocks-connector-for-apache-flink/pull/528).
+Sending one request of a table at a time keeps the order, deletes included: set `sink.merge-commit.max-concurrent-requests` to `1`. A task then sends the next request of a table only after the merged transaction of the previous one is visible. In the same test with deletes, every key ended at its last version, also through the same failures. It needs the SDK at starrocks-connector-for-apache-flink `3ad9f84` or later, which fixes [a data loss](https://github.com/StarRocks/starrocks-connector-for-apache-flink/pull/528) when a table reaches its limit, and costs latency and throughput:
+
+- A request waits until the previous one is visible, about one window plus the publish time. With a 1 second window, a record was visible after 2.0 seconds at p50 and 4.0 seconds at p99, against 0.5 to 0.9 and 2.0 seconds without a limit.
+- The merged transactions of a table then run one after another, and take longer as they grow. In a throughput test on a duplicate key table with 3 CNs of 16 cores each, a table took at most about 1.6 million rows per second, with 48 tasks and with 96, against 2.8 million without a limit.
 
 ## Latency
 
@@ -85,6 +88,8 @@ The time until a record is visible is roughly:
 ```
 consume + bufferflush.intervalms + up to merge_commit_interval_ms + commit and publish
 ```
+
+With `sink.merge-commit.max-concurrent-requests` set to `1`, add the wait for the previous request of the table to be visible, up to one more window plus commit and publish.
 
 When Kafka Connect commits offsets (every `offset.flush.interval.ms`), the task waits for its inflight loads and does not consume in the meantime.
 

@@ -29,6 +29,7 @@ import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.Test;
 
 import com.starrocks.data.load.stream.properties.StreamLoadProperties;
@@ -179,10 +180,17 @@ public class StarRocksSinkTaskMergeCommitTest {
         Assert.assertEquals(3000, properties.getRetryIntervalInMs());
     }
 
+    // With an SDK that keeps the data of a table that reaches its request limit, a limit of 1 sends the requests of
+    // a table one at a time, in larger chunks.
     @Test
-    public void testRequestLimitIsRejected() {
+    public void testRequestLimit() {
+        Assume.assumeTrue("the stream load SDK does not have starrocks-connector-for-apache-flink#528",
+                MergeCommitOptions.sdkKeepsDataAtRequestLimit());
         Map<String, String> props = mergeCommitProps();
-        props.put(MergeCommitOptions.MAX_CONCURRENT_REQUESTS, "0");
-        assertConfigException(() -> new StarRocksSinkTask().buildLoadProperties(props));
+        props.put(MergeCommitOptions.MAX_CONCURRENT_REQUESTS, "1");
+        StreamLoadProperties properties = new StarRocksSinkTask().buildLoadProperties(props);
+        Assert.assertEquals(1, properties.getMaxConcurrentRequests());
+        Assert.assertEquals(MergeCommitOptions.DEFAULT_CHUNK_SIZE_FOR_IN_ORDER,
+                properties.getTableProperties("db.tbl", "db", "tbl").getChunkLimit().longValue());
     }
 }

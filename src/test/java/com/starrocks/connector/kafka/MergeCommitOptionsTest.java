@@ -27,6 +27,7 @@ import org.apache.kafka.common.config.ConfigException;
 import org.junit.Assert;
 import org.junit.Test;
 
+import com.starrocks.data.load.stream.mergecommit.Table;
 import com.starrocks.data.load.stream.properties.StreamLoadProperties;
 import com.starrocks.data.load.stream.properties.StreamLoadTableProperties;
 
@@ -105,21 +106,36 @@ public class MergeCommitOptionsTest {
         Assert.assertTrue(errors.containsKey("sink.properties.merge_commit_async"));
     }
 
+    // A limit is only accepted with an SDK that keeps the data of a table that reaches it.
     @Test
-    public void testRequestLimitIsRejected() {
+    public void testRequestLimitNeedsTheSdkFix() {
         Map<String, String> props = mergeCommitProps();
         for (String limit : new String[] {"0", "1", "5"}) {
             props.put(MergeCommitOptions.MAX_CONCURRENT_REQUESTS, limit);
-            Assert.assertTrue(limit, MergeCommitOptions.validate(props).containsKey(MergeCommitOptions.MAX_CONCURRENT_REQUESTS));
+            Assert.assertTrue(limit, MergeCommitOptions.validate(props, false)
+                    .containsKey(MergeCommitOptions.MAX_CONCURRENT_REQUESTS));
+            Assert.assertTrue(limit, MergeCommitOptions.validate(props, true).isEmpty());
         }
         for (String noLimit : new String[] {"-1", String.valueOf(Integer.MAX_VALUE)}) {
             props.put(MergeCommitOptions.MAX_CONCURRENT_REQUESTS, noLimit);
-            Assert.assertTrue(noLimit, MergeCommitOptions.validate(props).isEmpty());
+            Assert.assertTrue(noLimit, MergeCommitOptions.validate(props, false).isEmpty());
         }
         // Without merge commit, the option does not matter.
         props.put(MergeCommitOptions.MAX_CONCURRENT_REQUESTS, "0");
         props.put("sink.properties.enable_merge_commit", "false");
-        Assert.assertTrue(MergeCommitOptions.validate(props).isEmpty());
+        Assert.assertTrue(MergeCommitOptions.validate(props, false).isEmpty());
+    }
+
+    // Stands in for the MergeCommitManager of an SDK with the fix.
+    public static class FixedMergeCommitManager {
+        public void onTableFailure(Table table, Throwable throwable) {
+        }
+    }
+
+    @Test
+    public void testDetectsTheSdkFix() {
+        Assert.assertTrue(MergeCommitOptions.hasRequestLimitFix(FixedMergeCommitManager.class));
+        Assert.assertFalse(MergeCommitOptions.hasRequestLimitFix(Object.class));
     }
 
     @Test

@@ -26,6 +26,8 @@ import java.util.Map;
 import org.apache.kafka.common.config.ConfigException;
 
 import com.starrocks.data.load.stream.mergecommit.LoadParameters;
+import com.starrocks.data.load.stream.mergecommit.MergeCommitManager;
+import com.starrocks.data.load.stream.mergecommit.Table;
 import com.starrocks.data.load.stream.properties.StreamLoadProperties;
 
 import static com.starrocks.connector.kafka.StarRocksSinkConnectorConfig.BUFFERFLUSH_INTERVALMS;
@@ -94,12 +96,22 @@ public class MergeCommitOptions {
     public static final long MIN_BUFFERFLUSH_INTERVAL_MS = 100;
     public static final long MIN_BUFFERFLUSH_INTERVAL_MS_WITHOUT_MERGE_COMMIT = 1000;
 
+    // The stream load SDK before starrocks-connector-for-apache-flink 3ad9f84 silently drops a chunk when a table's
+    // flush timer fires while the table is at its request limit, which is the common case with a limit. The fix
+    // (starrocks-connector-for-apache-flink#528) added MergeCommitManager.onTableFailure, so a limit is only
+    // accepted with an SDK that has it.
+    private static final boolean SDK_KEEPS_DATA_AT_REQUEST_LIMIT = hasRequestLimitFix(MergeCommitManager.class);
+
     public static boolean isEnabled(Map<String, String> streamLoadProps) {
         return "true".equalsIgnoreCase(streamLoadProps.get(ENABLE_MERGE_COMMIT));
     }
 
     // Returns the errors of the settings that merge commit depends on, keyed by the connector option.
     public static Map<String, String> validate(Map<String, String> props) {
+        return validate(props, SDK_KEEPS_DATA_AT_REQUEST_LIMIT);
+    }
+
+    static Map<String, String> validate(Map<String, String> props, boolean sdkKeepsDataAtRequestLimit) {
         Map<String, String> errors = new LinkedHashMap<>();
         Map<String, String> streamLoadProps = StarRocksSinkConnectorConfig.getStreamLoadProperties(props);
         boolean enabled = isEnabled(streamLoadProps);
@@ -127,15 +139,13 @@ public class MergeCommitOptions {
         if (async != null && !"true".equalsIgnoreCase(async) && !"false".equalsIgnoreCase(async)) {
             errors.put(SINK_PROPERTIES_PREFIX + MERGE_COMMIT_ASYNC, "must be true or false, but is " + async);
         }
-        // The stream load SDK of starrocks-connector-for-apache-flink e0eb030 silently drops a chunk when a
-        // table's flush timer fires while the table is at its request limit, which is the common case with a
-        // limit. Remove this check once the SDK includes the fix (starrocks-connector-for-apache-flink#528).
         Long maxConcurrentRequests = parseLongOrNull(props.get(MAX_CONCURRENT_REQUESTS));
         if (maxConcurrentRequests != null && maxConcurrentRequests >= 0
-                && maxConcurrentRequests != DEFAULT_MAX_CONCURRENT_REQUESTS) {
-            errors.put(MAX_CONCURRENT_REQUESTS, "a limit is not supported yet, because the stream load SDK can " +
-                    "drop data when a table reaches it. Leave it unset, and set " + SINK_PROPERTIES_PREFIX +
-                    "merge_condition to keep the order of the updates to a primary key table");
+                && maxConcurrentRequests != DEFAULT_MAX_CONCURRENT_REQUESTS && !sdkKeepsDataAtRequestLimit) {
+            errors.put(MAX_CONCURRENT_REQUESTS, "a limit needs the stream load SDK of " +
+                    "starrocks-connector-for-apache-flink 3ad9f84 or later, because an older SDK can drop data " +
+                    "when a table reaches it. Build the connector with a newer SDK, or leave this unset and set " +
+                    SINK_PROPERTIES_PREFIX + "merge_condition to keep the order of the updates to a primary key table");
         }
         return errors;
     }
@@ -214,6 +224,19 @@ public class MergeCommitOptions {
         if (!props.containsKey(SINK_PUBLISH_TIMEOUT_MS)) {
             builder.setPublishTimeoutMs(DEFAULT_PUBLISH_TIMEOUT_MS);
         }
+    }
+
+    static boolean hasRequestLimitFix(Class<?> mergeCommitManager) {
+        try {
+            mergeCommitManager.getMethod("onTableFailure", Table.class, Throwable.class);
+            return true;
+        } catch (NoSuchMethodException e) {
+            return false;
+        }
+    }
+
+    static boolean sdkKeepsDataAtRequestLimit() {
+        return SDK_KEEPS_DATA_AT_REQUEST_LIMIT;
     }
 
     private static boolean isPositiveInt(String value) {

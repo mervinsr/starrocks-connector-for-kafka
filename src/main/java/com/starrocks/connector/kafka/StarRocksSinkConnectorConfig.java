@@ -283,8 +283,8 @@ public class StarRocksSinkConnectorConfig {
                         ConfigDef.Importance.LOW,
                         "the maximum number of inflight requests of a table in a task. 0 or 1 sends one request " +
                                 "at a time, which keeps the order of the records for primary key tables. A " +
-                                "negative value means no limit. Only no limit is supported until the stream load " +
-                                "sdk fixes a data loss with a limit",
+                                "negative value means no limit. A limit needs the stream load sdk of " +
+                                "starrocks-connector-for-apache-flink 3ad9f84 or later",
                         CONFIG_GROUP_MERGE_COMMIT,
                         5,
                         ConfigDef.Width.NONE,

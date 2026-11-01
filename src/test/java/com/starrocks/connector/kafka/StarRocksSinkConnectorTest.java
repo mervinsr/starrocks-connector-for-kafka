@@ -103,8 +103,10 @@ public class StarRocksSinkConnectorTest {
         Assert.assertFalse(errors(config, MergeCommitOptions.MAX_RETRIES).isEmpty());
         Assert.assertFalse(errors(config, MergeCommitOptions.RETRY_INTERVAL_MS).isEmpty());
 
+        // A limit is accepted with an SDK that keeps the data of a table that reaches it.
         props.put(MergeCommitOptions.MAX_CONCURRENT_REQUESTS, "0");
         config = new StarRocksSinkConnector().validate(props);
-        Assert.assertEquals(1, errors(config, MergeCommitOptions.MAX_CONCURRENT_REQUESTS).size());
+        Assert.assertEquals(MergeCommitOptions.sdkKeepsDataAtRequestLimit() ? 0 : 1,
+                errors(config, MergeCommitOptions.MAX_CONCURRENT_REQUESTS).size());
     }
 }
