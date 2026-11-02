@@ -28,7 +28,5 @@ STARROCKS_IT_FE=<fe host> mvn test -Dtest='*IT'
 
 `STARROCKS_IT_HTTP_PORT`, `STARROCKS_IT_QUERY_PORT`, `STARROCKS_IT_USER` and `STARROCKS_IT_PASSWORD` override the defaults (8030, 9030, `root` and no password). Each run creates a database and drops it at the end, unless `STARROCKS_IT_KEEP_DATABASE=true`.
 
-The scripts in [`test/connect-e2e`](test/connect-e2e/README.md) run the connector in a real Kafka Connect cluster: end-to-end tests, performance runs, and fault tests that check every row arrives, or that a primary key table ends at the last version of every key.
-
 ## LICENSE
 The connector is under the [Apache License 2.0](LICENSE.txt).
